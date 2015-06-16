@@ -75,7 +75,7 @@ shmem_max_to_all_nobarrier(long* target, long* source, int nreduce,
     /* everyone must initialize */                                      
     for (j = 0; j < nreduce; j += 1) {                                                 write_to[j] = source[j];                                        
     }                                                                 
-    //shmem_barrier (PE_start, logPE_stride, PE_size, pSync);             
+    shmem_barrier (PE_start, logPE_stride, PE_size, pSync);             
     /* now go through other PEs and get source */                       
     pe = PE_start;                                                      
     for (i = 0; i < PE_size; i+= 1) 
@@ -85,7 +85,7 @@ shmem_max_to_all_nobarrier(long* target, long* source, int nreduce,
             int k;                                                      
             int ti = 0, si = 0; /* target and source index walk */      
             /* pull in all the full chunks */                           
-            nget = _SHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof (long);      
+	    /*      nget = _SHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof (long);      
             for (k = 0; k < nloops; k += 1)                             
               {                                                         
                 shmem_getmem (pWrk, & (source[si]), nget, pe);          
@@ -98,13 +98,14 @@ shmem_max_to_all_nobarrier(long* target, long* source, int nreduce,
               }                                                         
             nget = nrem * sizeof (long);                                
             /* now get remaining part of source */                      
-            shmem_getmem (pWrk, & (source[si]), nget, pe);              
+    /*            shmem_getmem (pWrk, & (source[si]), nget, pe);              
             for (j = 0; j < nrem; j += 1)                               
               {                                                         
                 write_to[ti] = write_to[ti]>pWrk[j]?write_to[ti]:pWrk[j];
                 ti += 1;                                                
-              }                                                         
-          }                                                             
+		}*/
+	    printf("mype:%d, pe:%d\n", mype, pe);                        
+          } 
         pe += step;                                                     
       }                                                                 
     /* everyone has to have finished */                                 
@@ -186,10 +187,11 @@ main ()
   //  if(shmem_my_pe() == 0) src[0] = 0xfffffff0;
   shmem_barrier_all ();
 
-  if(shmem_my_pe() == 0)
-    shmem_max_to_all_nobarrier (dst, src, 3, 0, 0, npes, pWrk, pSync);
-  else
-    shmem_min_to_all_nobarrier (dst, src, 3, 0, 0, npes, pWrk, pSync);
+  //  if(shmem_my_pe() == 0)
+  //    shmem_long_max_to_all(dst, src, 3, 0, 0, npes, pWrk, pSync);
+      shmem_max_to_all_nobarrier (dst, src, 3, 0, 0, npes, pWrk, pSync);
+    //  else
+    //    shmem_min_to_all_nobarrier (dst, src, 3, 0, 0, npes, pWrk, pSync);
   
   printf ("%d/%d   dst =", shmem_my_pe (), shmem_n_pes ());
   for (i = 0; i < N; i += 1)
