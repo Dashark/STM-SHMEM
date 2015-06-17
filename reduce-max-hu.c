@@ -104,7 +104,7 @@ shmem_max_to_all_nobarrier(long* target, long* source, int nreduce,
                 write_to[ti] = write_to[ti]>pWrk[j]?write_to[ti]:pWrk[j];
                 ti += 1;                                                
 		}*/
-	    printf("mype:%d, pe:%d\n", mype, pe);                        
+	    printf("mype:%d, pe:%d, nloops: %d\n", mype, pe, _SHMEM_REDUCE_MIN_WRKDATA_SIZE);                        
           } 
         pe += step;                                                     
       }                                                                 
@@ -187,9 +187,10 @@ main ()
   //  if(shmem_my_pe() == 0) src[0] = 0xfffffff0;
   shmem_barrier_all ();
 
-  //  if(shmem_my_pe() == 0)
-  //    shmem_long_max_to_all(dst, src, 3, 0, 0, npes, pWrk, pSync);
-      shmem_max_to_all_nobarrier (dst, src, 3, 0, 0, npes, pWrk, pSync);
+  if(shmem_my_pe() == 0)
+    shmem_getmem (pWrk, src, 4, 1);              
+      shmem_long_max_to_all(dst, src, 3, 0, 0, npes, pWrk, pSync);
+  //      shmem_max_to_all_nobarrier (dst, src, 3, 0, 0, npes, pWrk, pSync);
     //  else
     //    shmem_min_to_all_nobarrier (dst, src, 3, 0, 0, npes, pWrk, pSync);
   
@@ -198,6 +199,7 @@ main ()
     {
       printf (" %d", dst[i]);
     }
+  printf("  %d", pWrk[0]);
   printf ("\n");
 
   return 0;
