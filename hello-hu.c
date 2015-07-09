@@ -108,6 +108,34 @@ shmem_max_to_all_nobarrier(long* target, long* source, int nreduce,
     //shmem_barrier (PE_start, logPE_stride, PE_size, pSync);
 }
 
+int check_lv() {
+  int npes;
+  unsigned long ver[2] = {0}, tmver[2]={0};
+  npes = shmem_n_pes();
+  ver[0] = lock[0]>>8; ver[1] = lock[1]>>8; //keep the version
+  shmem_max_to_all_nobarrier(tmlock, lock, 2, 0, 0, npes, pWrk, pSync);
+  tmver[0] = tmlock[0] >> 8;
+  tmver[1] = tmlock[1] >> 8;
+  if((tmver[0] > ver[0]) || (tmver[1] > ver[1]) || tmlock[0]&MASK_LOCK || tmlock[1]&MASK_LOCK) { //already locked or not the newest, aborting
+    return 1;
+  }
+  return 0;
+}
+
+void sync_lv() {
+  int npes;
+  unsigned long tm3 = -1;
+  npes = shmem_n_pes();
+  shmem_max_to_all_nobarrier(tmlock, lock, 2, 0, 0, npes, pWrk, pSync);
+  if(((tmlock[0]&MASK_LOCK) == 0) && ((tmlock[1]&MASK_LOCK) == 0)) {
+    tm3 = tmlock[0]&MASK_PE;
+    if(tm3 > npes || tm3 < 0)
+      return ;
+    shmem_long_get(account, account, 2, tm3);
+    shmem_long_get(lock, lock, 2, tm3);
+  }
+}
+
 int
 main (int argc, char **argv)
 {
@@ -153,16 +181,11 @@ main (int argc, char **argv)
     if((ver[1]+1)>=(1<<24))
       overflow[1] = 1;
     // is the newest version?
-    shmem_max_to_all_nobarrier(tmlock, lock, 2, 0, 0, npes, pWrk, pSync);
-    if(((tmlock[0]>>8) > ver[0]) || ((tmlock[1]>>8) > ver[1]) || tmlock[0]&MASK_LOCK || tmlock[1]&MASK_LOCK) { //already locked or not the newest, aborting
+    if(check_lv()) {
       flag = flag == 0?1:0;  //change transferbound
       aborts += 1;
       //synchronization
-      if(((tmlock[0]&MASK_LOCK) == 0) && ((tmlock[1]&MASK_LOCK) == 0)) {
-	tm3 = me==0?1:0;//tmlock[0]&MASK_PE;
-	shmem_long_get(account, account, 2, tm3);
-	shmem_long_get(lock, lock, 2, tm3);
-      }
+      sync_lv();
       continue;
     }
     //locking
@@ -199,7 +222,7 @@ main (int argc, char **argv)
     if(commits++ > 10000)
       break;
   }
-  shmem_barrier_all();
+  //  shmem_barrier_all();
   printf("%s the %d of %d\n", u.nodename, me, npes);
   if((account[0]+account[1])==0) {
     printf ("verification passed! %d, %d\n", account[0], account[1]);
