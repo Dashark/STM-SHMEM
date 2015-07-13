@@ -44,6 +44,7 @@
 #include <shmem.h>
 #define MASK_LOCK  0x00000080
 #define MASK_PE  0x0000007F
+#define MASK_VER 0xFFFFFF00
 
 long pSync[_SHMEM_REDUCE_SYNC_SIZE];
 long pWrk[_SHMEM_REDUCE_SYNC_SIZE];
@@ -133,7 +134,9 @@ void sync_lv() {
     if(tm3 > npes || tm3 < 0)
       return ;
     shmem_long_get(account, account, 2, tm3);
-    shmem_long_get(lock, lock, 2, tm3);
+    shmem_long_get(tmlock, lock, 2, tm3);
+    lock[0] = tmlock[0]&MASK_VER+lock[0]&MASK_PE;
+    lock[1] = tmlock[1]&MASK_VER+lock[1]&MASK_PE;
   }
 }
 
@@ -157,11 +160,12 @@ main (int argc, char **argv)
 
   me = shmem_my_pe ();
   npes = shmem_n_pes ();
+  lock[0] = me; lock[1] = me;
 
   while(1) {
     //for debuging
-    //if(aborts > 100000)
-    //      break;
+    if(aborts > 100000)
+      break;
     //stm_begin();
     //stm_read();
     tm1 = account[0];
