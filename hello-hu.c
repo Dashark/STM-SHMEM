@@ -48,7 +48,8 @@
 long pSync[_SHMEM_REDUCE_SYNC_SIZE];
 long pWrk[_SHMEM_REDUCE_SYNC_SIZE];
 
-unsigned long lock[2]={0}, tmlock[2]={0};
+unsigned long lock[2]={0};
+unsigned long tmlock[2]={0};
 unsigned long account[2]={0};
 long shared = 0;
 long tm1, tm2, tm3;
@@ -159,21 +160,21 @@ main (int argc, char **argv)
 
   while(1) {
     //for debuging
-    if(aborts > 100000)
-      break;
+    //if(aborts > 100000)
+    //      break;
     //stm_begin();
     //stm_read();
     tm1 = account[0];
     tm2 = account[1];
     //stm_write();
-    if(flag == 0) {
-      tm1 = tm1 - (me + 1);
-      tm2 = tm2 + (me + 1);
-    }
-    else {
-      tm1 = tm1 + (me + 1);
-      tm2 = tm2 - (me + 1);
-    }
+    //    if(flag == 0) {
+      tm1 = tm1 - 1;
+      tm2 = tm2 + 1;
+      //    }
+      //    else {
+      //      tm1 = tm1 + 1;
+      //      tm2 = tm2 - 1;
+      //    }
     //commit
     ver[0] = lock[0]>>8; ver[1] = lock[1]>>8; //keep the version
     if((ver[0]+1)>=(1<<24))
@@ -219,7 +220,7 @@ main (int argc, char **argv)
       }
     }
     lock[0] = (ver[0]<<8)+me; lock[1] = (ver[1]<<8)+me; //unlock and update version.
-    if(commits++ > 10000)
+    if(commits++ > 1000)
       break;
   }
   //  shmem_barrier_all();
@@ -227,7 +228,7 @@ main (int argc, char **argv)
   if((account[0]+account[1])==0) {
     printf ("verification passed! %d, %d\n", account[0], account[1]);
     printf("commits: %d, aborts: %d\n", commits, aborts);
-    printf("ver1: %x, ver2: %x \n", lock[0], lock[1]);
+    printf("ver1: %d, ver2: %x \n", lock[0]>>8, lock[1]);
   }
   else
     printf("verification failed, %d, %d\n", account[0], account[1]);
