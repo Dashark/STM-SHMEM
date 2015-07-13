@@ -129,15 +129,15 @@ void sync_lv() {
   unsigned long tm3 = -1;
   npes = shmem_n_pes();
   shmem_max_to_all_nobarrier(tmlock, lock, 2, 0, 0, npes, pWrk, pSync);
-  if(((tmlock[0]&MASK_LOCK) == 0) && ((tmlock[1]&MASK_LOCK) == 0)) {
+  //  if(((tmlock[0]&MASK_LOCK) == 0) && ((tmlock[1]&MASK_LOCK) == 0)) {
     tm3 = tmlock[0]&MASK_PE;
     if(tm3 > npes || tm3 < 0)
       return ;
     shmem_long_get(account, account, 2, tm3);
-    shmem_long_get(tmlock, lock, 2, tm3);
-    lock[0] = tmlock[0]&MASK_VER+lock[0]&MASK_PE;
-    lock[1] = tmlock[1]&MASK_VER+lock[1]&MASK_PE;
-  }
+    //shmem_long_get(tmlock, lock, 2, tm3);
+    lock[0] = (tmlock[0]&MASK_VER)+(lock[0]&MASK_PE);
+    lock[1] = (tmlock[1]&MASK_VER)+(lock[1]&MASK_PE);
+    //  }
 }
 
 int
@@ -146,7 +146,7 @@ main (int argc, char **argv)
   int flag = 0; //transfer from A to B
   int overflow[2] = {0}; //control version overflow
   int me, npes, i=0;
-  int commits = 0, aborts = 0, lock1=0;
+  int commits = 0, aborts[2] = {0}, lock1=0;
   unsigned long ver[2] = {0};
   unsigned long tm1, tm2;
   struct utsname u;
@@ -164,8 +164,8 @@ main (int argc, char **argv)
 
   while(1) {
     //for debuging
-    if(aborts > 100000)
-      break;
+    //    if(aborts[0] > 10000 || aborts[1]>10000)
+    //      break;
     //stm_begin();
     //stm_read();
     tm1 = account[0];
@@ -188,19 +188,19 @@ main (int argc, char **argv)
     // is the newest version?
     if(check_lv()) {
       flag = flag == 0?1:0;  //change transferbound
-      aborts += 1;
+      aborts[0] += 1;
       //synchronization
       sync_lv();
       continue;
     }
     //locking
-    lock[0] += me + MASK_LOCK;
-    lock[1] += me + MASK_LOCK;
+    lock[0] += MASK_LOCK;
+    lock[1] += MASK_LOCK;
     // is the newest version? because no atomic
     shmem_max_to_all_nobarrier(tmlock, lock, 2, 0, 0, npes, pWrk, pSync);
     if(tmlock[0] != lock[0] || tmlock[1] != lock[1]) {
       flag = flag == 0?1:0;
-      aborts += 1;
+      aborts[1] += 1;
       lock[0] = (ver[0]<<8)+me; lock[1] = (ver[1]<<8)+me; //unlock
       continue;
     } 
@@ -231,7 +231,7 @@ main (int argc, char **argv)
   printf("%s the %d of %d\n", u.nodename, me, npes);
   if((account[0]+account[1])==0) {
     printf ("verification passed! %d, %d\n", account[0], account[1]);
-    printf("commits: %d, aborts: %d\n", commits, aborts);
+    printf("commits: %d, aborts: %d, %d\n", commits, aborts[0], aborts[1]);
     printf("ver1: %d, ver2: %x \n", lock[0]>>8, lock[1]);
   }
   else
