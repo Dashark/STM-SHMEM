@@ -135,7 +135,7 @@ void sync_lv() {
   unsigned long tm3 = -1;
   npes = shmem_n_pes();
   shmem_max_to_all_nobarrier(tmlock, lock, 2, 0, 0, npes, pWrk, pSync);
-  //  if(((tmlock[0]&MASK_LOCK) == 0) && ((tmlock[1]&MASK_LOCK) == 0)) {
+    if(((tmlock[0]&MASK_LOCK) == 0) && ((tmlock[1]&MASK_LOCK) == 0)) {
   tm3 = tmlock[0].pe;
     if(tm3 > npes || tm3 < 0)
       return ;
@@ -143,7 +143,8 @@ void sync_lv() {
     //shmem_long_get(tmlock, lock, 2, tm3);
     lock[0].v = tmlock[0].v;//(tmlock[0]&MASK_VER)+(lock[0]&MASK_PE);
     lock[1].v = tmlock[1].v;//(tmlock[1]&MASK_VER)+(lock[1]&MASK_PE);
-    //  }
+    }
+    //__sync_synchronize();
 }
 
 int
@@ -202,6 +203,7 @@ main (int argc, char **argv)
     //locking
     lock[0].l = 1;//MASK_LOCK;
     lock[1].l = 1;//MASK_LOCK;
+    __sync_synchronize();
     // is the newest version? because no atomic
     shmem_max_to_all_nobarrier(tmlock, lock, 2, 0, 0, npes, pWrk, pSync);
     if(tmlock[0].pe != lock[0].pe || tmlock[1].pe != lock[1].pe) {
