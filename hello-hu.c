@@ -45,20 +45,25 @@
 #define MASK_LOCK  0x00000080
 #define MASK_PE  0x0000007F
 #define MASK_VER 0xFFFFFF00
+typedef struct {
+  unsigned long pe:7;
+  unsigned long v:24;
+  unsigned long l:1;
 
+} vlock_t;
 long pSync[_SHMEM_REDUCE_SYNC_SIZE];
 long pWrk[_SHMEM_REDUCE_SYNC_SIZE];
 
-unsigned long lock[2]={0};
-unsigned long tmlock[2]={0};
+vlock_t lock[2]={0};
+vlock_t tmlock[2]={0};
 unsigned long account[2]={0};
 long shared = 0;
 long tm1, tm2, tm3;
 
 void
-shmem_max_to_all_nobarrier(long* target, long* source, int nreduce,	
+shmem_max_to_all_nobarrier(unsigned long* target, unsigned long* source, int nreduce,	
                                int PE_start, int logPE_stride, int PE_size, 
-                               long *pWrk, long *pSync)                 
+                               unsigned long *pWrk, long *pSync)                 
   {                                                                     
     const int step = 1 << logPE_stride;                                 
     const int nloops = nreduce / _SHMEM_REDUCE_MIN_WRKDATA_SIZE;        
@@ -69,7 +74,7 @@ shmem_max_to_all_nobarrier(long* target, long* source, int nreduce,
     int i, j;                                                           
     int pe, mype;                                                             
     long* tmptrg = NULL;                                                
-    long* write_to=target;                                               
+    unsigned long* write_to=target;                                               
     mype = shmem_my_pe();
     /* everyone must initialize */                                      
     for (j = 0; j < nreduce; j += 1) {                                                 write_to[j] = source[j];                                        
@@ -114,11 +119,12 @@ int check_lv() {
   int npes;
   unsigned long ver[2] = {0}, tmver[2]={0};
   npes = shmem_n_pes();
-  ver[0] = lock[0]>>8; ver[1] = lock[1]>>8; //keep the version
+  //  ver[0] = lock[0]>>8; ver[1] = lock[1]>>8; //keep the version
   shmem_max_to_all_nobarrier(tmlock, lock, 2, 0, 0, npes, pWrk, pSync);
-  tmver[0] = tmlock[0] >> 8;
-  tmver[1] = tmlock[1] >> 8;
-  if((tmver[0] > ver[0]) || (tmver[1] > ver[1]) || tmlock[0]&MASK_LOCK || tmlock[1]&MASK_LOCK) { //already locked or not the newest, aborting
+  //  tmver[0] = tmlock[0] >> 8;
+  //  tmver[1] = tmlock[1] >> 8;
+  //  if((tmver[0] > ver[0]) || (tmver[1] > ver[1]) || tmlock[0]&MASK_LOCK || tmlock[1]&MASK_LOCK) { //already locked or not the newest, aborting
+  if(tmlock[0].v>lock[0].v || tmlock[1].v > lock[1].v || tmlock[0].l || tmlock[1].l){
     return 1;
   }
   return 0;
@@ -130,13 +136,13 @@ void sync_lv() {
   npes = shmem_n_pes();
   shmem_max_to_all_nobarrier(tmlock, lock, 2, 0, 0, npes, pWrk, pSync);
   //  if(((tmlock[0]&MASK_LOCK) == 0) && ((tmlock[1]&MASK_LOCK) == 0)) {
-    tm3 = tmlock[0]&MASK_PE;
+  tm3 = tmlock[0].pe;
     if(tm3 > npes || tm3 < 0)
       return ;
     shmem_long_get(account, account, 2, tm3);
     //shmem_long_get(tmlock, lock, 2, tm3);
-    lock[0] = (tmlock[0]&MASK_VER)+(lock[0]&MASK_PE);
-    lock[1] = (tmlock[1]&MASK_VER)+(lock[1]&MASK_PE);
+    lock[0].v = tmlock[0].v;//(tmlock[0]&MASK_VER)+(lock[0]&MASK_PE);
+    lock[1].v = tmlock[1].v;//(tmlock[1]&MASK_VER)+(lock[1]&MASK_PE);
     //  }
 }
 
@@ -160,12 +166,12 @@ main (int argc, char **argv)
 
   me = shmem_my_pe ();
   npes = shmem_n_pes ();
-  lock[0] = me; lock[1] = me;
+  lock[0].pe = me; lock[1].pe = me;
 
   while(1) {
     //for debuging
-    //    if(aborts[0] > 10000 || aborts[1]>10000)
-    //      break;
+    if(aborts[0] > 10000 || aborts[1]>10000)
+          break;
     //stm_begin();
     //stm_read();
     tm1 = account[0];
@@ -180,7 +186,7 @@ main (int argc, char **argv)
       //      tm2 = tm2 - 1;
       //    }
     //commit
-    ver[0] = lock[0]>>8; ver[1] = lock[1]>>8; //keep the version
+    //ver[0] = lock[0]>>8; ver[1] = lock[1]>>8; //keep the version
     if((ver[0]+1)>=(1<<24))
       overflow[0] = 1;
     if((ver[1]+1)>=(1<<24))
@@ -194,14 +200,17 @@ main (int argc, char **argv)
       continue;
     }
     //locking
-    lock[0] += MASK_LOCK;
-    lock[1] += MASK_LOCK;
+    lock[0].l = 1;//MASK_LOCK;
+    lock[1].l = 1;//MASK_LOCK;
     // is the newest version? because no atomic
     shmem_max_to_all_nobarrier(tmlock, lock, 2, 0, 0, npes, pWrk, pSync);
-    if(tmlock[0] != lock[0] || tmlock[1] != lock[1]) {
+    if(tmlock[0].pe != lock[0].pe || tmlock[1].pe != lock[1].pe) {
       flag = flag == 0?1:0;
       aborts[1] += 1;
-      lock[0] = (ver[0]<<8)+me; lock[1] = (ver[1]<<8)+me; //unlock
+      lock[0].l = 0;//(ver[0]<<8)+me;
+      lock[1].l = 0;//(ver[1]<<8)+me; //unlock
+      lock[0].v = tmlock[0].v;
+      lock[1].v = tmlock[1].v;
       continue;
     } 
     account[0] = tm1;
@@ -223,7 +232,10 @@ main (int argc, char **argv)
 	  shmem_long_p(&lock[1], -1, i);
       }
     }
-    lock[0] = (ver[0]<<8)+me; lock[1] = (ver[1]<<8)+me; //unlock and update version.
+    lock[0].v += 1;//(ver[0]<<8)+me; lock[1] = (ver[1]<<8)+me; //unlock and update version.
+    lock[1].v += 1;
+    lock[0].l = 0;
+    lock[1].l = 0;
     if(commits++ > 1000)
       break;
   }
@@ -232,7 +244,7 @@ main (int argc, char **argv)
   if((account[0]+account[1])==0) {
     printf ("verification passed! %d, %d\n", account[0], account[1]);
     printf("commits: %d, aborts: %d, %d\n", commits, aborts[0], aborts[1]);
-    printf("ver1: %d, ver2: %x \n", lock[0]>>8, lock[1]);
+    printf("ver1: %d,%d,%d ver2: %x \n", lock[0].v,lock[0].l,lock[0].pe, lock[0]);
   }
   else
     printf("verification failed, %d, %d\n", account[0], account[1]);
