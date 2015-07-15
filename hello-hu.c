@@ -60,6 +60,9 @@ unsigned long account[2]={0};
 long shared = 0;
 long tm1, tm2, tm3;
 
+void lv_max_to_all() {
+  
+}
 void
 shmem_max_to_all_nobarrier(unsigned long* target, unsigned long* source, int nreduce,	
                                int PE_start, int logPE_stride, int PE_size, 
@@ -95,7 +98,7 @@ shmem_max_to_all_nobarrier(unsigned long* target, unsigned long* source, int nre
                 shmem_getmem (pWrk, & (source[si]), nget, pe);          
                 for (j = 0; j < _SHMEM_REDUCE_MIN_WRKDATA_SIZE; j += 1)	
                   {                                                     
-                    write_to[ti] = write_to[ti]>pWrk[j]?write_to[ti]:pWrk[j];
+                    write_to[ti] = (write_to[ti]>>8)>(pWrk[j]>>8)?write_to[ti]:pWrk[j];
                     ti += 1;                                            
                   }                                                     
                 si += _SHMEM_REDUCE_MIN_WRKDATA_SIZE;                   
@@ -105,7 +108,7 @@ shmem_max_to_all_nobarrier(unsigned long* target, unsigned long* source, int nre
             shmem_getmem (pWrk, & (source[si]), nget, pe);              
             for (j = 0; j < nrem; j += 1)                               
               {                                                         
-                write_to[ti] = write_to[ti]>pWrk[j]?write_to[ti]:pWrk[j];
+                write_to[ti] = (write_to[ti]>>8)>(pWrk[j]>>8)?write_to[ti]:pWrk[j];
                 ti += 1;                                                
               }                                                         
           }                                                             
