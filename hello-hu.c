@@ -40,6 +40,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/utsname.h>
+#include <stdlib.h>
 
 #include <shmem.h>
 #define MASK_LOCK  0x00000080
@@ -47,9 +48,8 @@
 #define MASK_VER 0xFFFFFF00
 typedef struct {
   unsigned long pe:7;
-  unsigned long v:24;
   unsigned long l:1;
-
+  unsigned long v:24;
 } vlock_t;
 long pSync[_SHMEM_REDUCE_SYNC_SIZE];
 long pWrk[_SHMEM_REDUCE_SYNC_SIZE];
@@ -60,8 +60,32 @@ unsigned long account[2]={0};
 long shared = 0;
 long tm1, tm2, tm3;
 
-void lv_max_to_all() {
-  
+int check_lv_all(vlock_t* target, vlock_t* source, int nsize, int PEsize) {
+  int pe, ret = 0, i;
+  vlock_t* pWrk;
+  for(i=0; i<nsize; ++i)
+    target[i] = source[i];
+  pWrk = (vlock_t*)malloc(nsize * sizeof(vlock_t));
+  for(pe=0; pe<PEsize; ++pe) {
+    if(pe != shmem_my_pe()) {
+      shmem_getmem(pWrk, source, nsize*sizeof(vlock_t), pe);
+      //for(i=0;i<nsize;++i)
+      //target[i].v = target[i].v>pWrk[i].v?target[i].v:pWrk[i].v;
+      if(pWrk[0].l || pWrk[1].l) {
+        ret = 1; //locked
+	break;
+      }
+      if(pWrk[0].v > target[0].v || pWrk[1].v > target[1].v) {
+        ret = 2; //old version
+	for(i=0;i<nsize;++i)
+	  target[i] = pWrk[i];
+	//break;
+      }
+    }
+  }
+
+  free(pWrk);
+  return ret;
 }
 void
 shmem_max_to_all_nobarrier(unsigned long* target, unsigned long* source, int nreduce,	
@@ -138,7 +162,8 @@ void sync_lv() {
   unsigned long tm3 = -1;
   npes = shmem_n_pes();
   shmem_max_to_all_nobarrier(tmlock, lock, 2, 0, 0, npes, pWrk, pSync);
-    if(((tmlock[0]&MASK_LOCK) == 0) && ((tmlock[1]&MASK_LOCK) == 0)) {
+  //    if(((tmlock[0]&MASK_LOCK) == 0) && ((tmlock[1]&MASK_LOCK) == 0)) {
+  if(tmlock[0].l == 0 && tmlock[1].l == 0) {
   tm3 = tmlock[0].pe;
     if(tm3 > npes || tm3 < 0)
       return ;
@@ -155,8 +180,8 @@ main (int argc, char **argv)
 {
   int flag = 0; //transfer from A to B
   int overflow[2] = {0}; //control version overflow
-  int me, npes, i=0;
-  int commits = 0, aborts[2] = {0}, lock1=0;
+  int me, npes, i=0, tm3;
+  int commits = 0, aborts[4] = {0}, lock1=0;
   unsigned long ver[2] = {0};
   unsigned long tm1, tm2;
   struct utsname u;
@@ -174,8 +199,10 @@ main (int argc, char **argv)
 
   while(1) {
     //for debuging
-    if(aborts[0] > 10000 || aborts[1]>10000)
-          break;
+    if(aborts[0] > 100000 || aborts[1]>100000) {
+      //lock[0].l = lock[1].l = 0;
+      break;
+    }
     //stm_begin();
     //stm_read();
     tm1 = account[0];
@@ -196,11 +223,19 @@ main (int argc, char **argv)
     if((ver[1]+1)>=(1<<24))
       overflow[1] = 1;
     // is the newest version?
-    if(check_lv()) {
+    //if(check_lv()) {
+    if(tm3=check_lv_all(tmlock, lock, 2, npes)){
       flag = flag == 0?1:0;  //change transferbound
-      aborts[0] += 1;
+      if(tm3==1) {
+        aborts[0] += 1;
+	continue;
+      }
+      if(tm3==2) aborts[1] += 1;
       //synchronization
-      sync_lv();
+      //sync_lv();
+      lock[0].v = tmlock[0].v;
+      lock[1].v = tmlock[1].v;
+      shmem_getmem(account, account, 2*sizeof(long), tmlock[0].pe);
       continue;
     }
     //locking
@@ -208,10 +243,12 @@ main (int argc, char **argv)
     lock[1].l = 1;//MASK_LOCK;
     __sync_synchronize();
     // is the newest version? because no atomic
-    shmem_max_to_all_nobarrier(tmlock, lock, 2, 0, 0, npes, pWrk, pSync);
-    if(tmlock[0].pe != lock[0].pe || tmlock[1].pe != lock[1].pe) {
+    //    shmem_max_to_all_nobarrier(tmlock, lock, 2, 0, 0, npes, pWrk, pSync);
+    //    if(tmlock[0].pe != lock[0].pe || tmlock[1].pe != lock[1].pe) {
+    if(tm3=check_lv_all(tmlock, lock, 2, npes)) {
       flag = flag == 0?1:0;
-      aborts[1] += 1;
+      if(tm3==1) {aborts[2] += 1; lock[0].l=lock[1].l = 0; continue;}
+      if(tm3==2) aborts[3] += 1;
       lock[0].l = 0;//(ver[0]<<8)+me;
       lock[1].l = 0;//(ver[1]<<8)+me; //unlock
       lock[0].v = tmlock[0].v;
@@ -248,7 +285,7 @@ main (int argc, char **argv)
   printf("%s the %d of %d\n", u.nodename, me, npes);
   if((account[0]+account[1])==0) {
     printf ("verification passed! %d, %d\n", account[0], account[1]);
-    printf("commits: %d, aborts: %d, %d\n", commits, aborts[0], aborts[1]);
+    printf("commits: %d, aborts: %d, %d, %d, %d\n", commits, aborts[0], aborts[1], aborts[2], aborts[3]);
     printf("ver1: %d,%d,%d ver2: %x \n", lock[0].v,lock[0].l,lock[0].pe, lock[0]);
   }
   else
