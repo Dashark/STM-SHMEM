@@ -60,6 +60,15 @@ unsigned long account[2]={0};
 long shared = 0;
 long tm1, tm2, tm3;
 
+int check_lock(vlock_t* lock, int size) {
+  int i;
+  for(i=0; i<size; ++i) {
+    if(lock[i].l)
+      return 1;   // at least one locked in group
+  }
+  return 0;
+}
+
 int check_lv_all(vlock_t* target, vlock_t* source, int nsize, int PEsize) {
   int pe, ret = 0, i;
   vlock_t* pWrk;
@@ -69,10 +78,8 @@ int check_lv_all(vlock_t* target, vlock_t* source, int nsize, int PEsize) {
   for(pe=0; pe<PEsize; ++pe) {
     if(pe != shmem_my_pe()) {
       shmem_getmem(pWrk, source, nsize*sizeof(vlock_t), pe);
-      //for(i=0;i<nsize;++i)
-      //target[i].v = target[i].v>pWrk[i].v?target[i].v:pWrk[i].v;
-      if(pWrk[0].l || pWrk[1].l) {
-        ret = 1; //locked
+      if(check_lock(pWrk, nsize)){
+	ret = 1;
 	break;
       }
       if(pWrk[0].v > target[0].v || pWrk[1].v > target[1].v) {
@@ -86,93 +93,6 @@ int check_lv_all(vlock_t* target, vlock_t* source, int nsize, int PEsize) {
 
   free(pWrk);
   return ret;
-}
-void
-shmem_max_to_all_nobarrier(unsigned long* target, unsigned long* source, int nreduce,	
-                               int PE_start, int logPE_stride, int PE_size, 
-                               unsigned long *pWrk, long *pSync)                 
-  {                                                                     
-    const int step = 1 << logPE_stride;                                 
-    const int nloops = nreduce / _SHMEM_REDUCE_MIN_WRKDATA_SIZE;        
-    const int nrem = nreduce % _SHMEM_REDUCE_MIN_WRKDATA_SIZE;          
-    const int snred = sizeof(long) * nreduce;                           
-
-    size_t nget;                                                        
-    int i, j;                                                           
-    int pe, mype;                                                             
-    long* tmptrg = NULL;                                                
-    unsigned long* write_to=target;                                               
-    mype = shmem_my_pe();
-    /* everyone must initialize */                                      
-    for (j = 0; j < nreduce; j += 1) {                                                 write_to[j] = source[j];                                        
-    }                                                                 
-    //shmem_barrier (PE_start, logPE_stride, PE_size, pSync);             
-    /* now go through other PEs and get source */                       
-    pe = PE_start;                                                      
-    for (i = 0; i < PE_size; i+= 1) 
-      {                                                                 
-        if (mype != pe)                                     
-          {                                                             
-            int k;                                                      
-            int ti = 0, si = 0; /* target and source index walk */      
-            /* pull in all the full chunks */                           
-            nget = _SHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof (long);      
-            for (k = 0; k < nloops; k += 1)                             
-              {                                                         
-                shmem_getmem (pWrk, & (source[si]), nget, pe);          
-                for (j = 0; j < _SHMEM_REDUCE_MIN_WRKDATA_SIZE; j += 1)	
-                  {                                                     
-                    write_to[ti] = (write_to[ti]>>8)>(pWrk[j]>>8)?write_to[ti]:pWrk[j];
-                    ti += 1;                                            
-                  }                                                     
-                si += _SHMEM_REDUCE_MIN_WRKDATA_SIZE;                   
-              }                                                         
-            nget = nrem * sizeof (long);                                
-            /* now get remaining part of source */                      
-            shmem_getmem (pWrk, & (source[si]), nget, pe);              
-            for (j = 0; j < nrem; j += 1)                               
-              {                                                         
-                write_to[ti] = (write_to[ti]>>8)>(pWrk[j]>>8)?write_to[ti]:pWrk[j];
-                ti += 1;                                                
-              }                                                         
-          }                                                             
-        pe += step;                                                     
-      }                                                                 
-    /* everyone has to have finished */                                 
-    //shmem_barrier (PE_start, logPE_stride, PE_size, pSync);
-}
-
-int check_lv() {
-  int npes;
-  unsigned long ver[2] = {0}, tmver[2]={0};
-  npes = shmem_n_pes();
-  //  ver[0] = lock[0]>>8; ver[1] = lock[1]>>8; //keep the version
-  shmem_max_to_all_nobarrier(tmlock, lock, 2, 0, 0, npes, pWrk, pSync);
-  //  tmver[0] = tmlock[0] >> 8;
-  //  tmver[1] = tmlock[1] >> 8;
-  //  if((tmver[0] > ver[0]) || (tmver[1] > ver[1]) || tmlock[0]&MASK_LOCK || tmlock[1]&MASK_LOCK) { //already locked or not the newest, aborting
-  if(tmlock[0].v>lock[0].v || tmlock[1].v > lock[1].v || tmlock[0].l || tmlock[1].l){
-    return 1;
-  }
-  return 0;
-}
-
-void sync_lv() {
-  int npes;
-  unsigned long tm3 = -1;
-  npes = shmem_n_pes();
-  shmem_max_to_all_nobarrier(tmlock, lock, 2, 0, 0, npes, pWrk, pSync);
-  //    if(((tmlock[0]&MASK_LOCK) == 0) && ((tmlock[1]&MASK_LOCK) == 0)) {
-  if(tmlock[0].l == 0 && tmlock[1].l == 0) {
-  tm3 = tmlock[0].pe;
-    if(tm3 > npes || tm3 < 0)
-      return ;
-    shmem_long_get(account, account, 2, tm3);
-    //shmem_long_get(tmlock, lock, 2, tm3);
-    lock[0].v = tmlock[0].v;//(tmlock[0]&MASK_VER)+(lock[0]&MASK_PE);
-    lock[1].v = tmlock[1].v;//(tmlock[1]&MASK_VER)+(lock[1]&MASK_PE);
-    }
-    //__sync_synchronize();
 }
 
 int
