@@ -253,6 +253,7 @@ main (int argc, char **argv)
       lock[1].l = 0;//(ver[1]<<8)+me; //unlock
       lock[0].v = tmlock[0].v;
       lock[1].v = tmlock[1].v;
+      shmem_getmem(account, account, 2*sizeof(long), tmlock[0].pe);
       continue;
     } 
     account[0] = tm1;
