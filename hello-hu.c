@@ -40,6 +40,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/utsname.h>
+#include <sys/time.h>
 #include <stdlib.h>
 
 #include <shmem.h>
@@ -105,6 +106,8 @@ main (int argc, char **argv)
   unsigned long ver[2] = {0};
   unsigned long tm1, tm2;
   struct utsname u;
+  struct timeval start, end;
+  int dur;
 
   for (i = 0; i < _SHMEM_REDUCE_SYNC_SIZE; i += 1) {
       pSync[i] = _SHMEM_SYNC_VALUE;
@@ -117,6 +120,7 @@ main (int argc, char **argv)
   npes = shmem_n_pes ();
   lock[0].pe = me; lock[1].pe = me;
 
+  gettimeofday(&start, NULL);
   while(1) {
     //for debuging
     if(aborts[0] > 100000 || aborts[1]>100000) {
@@ -199,14 +203,18 @@ main (int argc, char **argv)
     lock[1].v += 1;
     lock[0].l = 0;
     lock[1].l = 0;
-    if(commits++ > 1000)
+    commits += 1;
+
+    gettimeofday(&end, NULL);
+    dur = (end.tv_sec * 1000 + end.tv_usec / 1000) - (start.tv_sec * 1000 + start.tv_usec / 1000);
+    if(dur > 1000)
       break;
   }
   //  shmem_barrier_all();
   printf("%s the %d of %d\n", u.nodename, me, npes);
   if((account[0]+account[1])==0) {
     printf ("verification passed! %d, %d\n", account[0], account[1]);
-    printf("commits: %d, aborts: %d, %d, %d, %d\n", commits, aborts[0], aborts[1], aborts[2], aborts[3]);
+    printf("dur: %d, commits: %d, aborts: %d, %d, %d, %d\n",dur, commits, aborts[0], aborts[1], aborts[2], aborts[3]);
     printf("ver1: %d,%d,%d ver2: %x \n", lock[0].v,lock[0].l,lock[0].pe, lock[0]);
   }
   else
