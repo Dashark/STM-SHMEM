@@ -42,6 +42,7 @@
 #include <sys/utsname.h>
 #include <sys/time.h>
 #include <stdlib.h>
+#include <setjmp.h>
 
 #include <shmem.h>
 #define MASK_LOCK  0x00000080
@@ -57,9 +58,31 @@ long pWrk[_SHMEM_REDUCE_SYNC_SIZE];
 
 vlock_t lock[2]={0};
 vlock_t tmlock[2]={0};
-unsigned long account[2]={0};
+long account[2]={0};
 long shared = 0;
 long tm1, tm2, tm3;
+//these codes are modified from tinySTM
+typedef struct stm_tx {
+  sigjmp_buf env;
+  int me, npes;  //for SHMEM
+  vlock_t lock[2];  //read set or write set
+
+  //for debug
+  int commits;
+  int aborts[4];
+} stm_tx_t;
+static stm_tx_t g_tx;  //global transactional descriptor
+void stm_init(stm_tx_t* tx) {
+  tx->me = shmem_my_pe ();
+  tx->npes = shmem_n_pes();
+}
+void stm_start(stm_tx_t* tx) {
+}
+long stm_load(stm_tx_t* tx, long* addr) {
+  return 0;
+}
+void stm_store(stm_tx_t* tx, long* addr, long val) {
+}
 
 int check_lock(vlock_t* lock, int size) {
   int i;
@@ -94,6 +117,56 @@ int check_lv_all(vlock_t* target, vlock_t* source, int nsize, int PEsize) {
 
   free(pWrk);
   return ret;
+}
+
+void stm_commit(stm_tx_t* tx) {
+  int tmp;
+  tmp =check_lv_all(tmlock, tx->lock, 2, tx->npes);
+  if(tmp == 1) {
+    tx->aborts[0] += 1;
+    siglongjmp(tx->env, 0);  //what's the second param?
+  }
+  else if(tmp == 2) {
+    tx->aborts[1] += 1;
+    //synchronization
+    tx->lock[0].v = tmlock[0].v;
+    tx->lock[1].v = tmlock[1].v;
+    shmem_getmem(account, account, 2*sizeof(long), tmlock[0].pe);
+    siglongjmp(tx->env, 0);
+  }
+  tx->lock[0].l = 1;//MASK_LOCK;
+  tx->lock[1].l = 1;//MASK_LOCK;
+  __sync_synchronize();
+  tmp = check_lv_all(tmlock, tx->lock, 2, tx->npes);
+  if(tmp == 1) {
+    tx->aborts[2] += 1;
+    tx->lock[0].l = 0;
+    tx->lock[1].l = 0;
+    siglongjmp(tx->env, 0);
+  }
+  else if(tmp == 2) {
+    tx->aborts[3] += 1;
+    tx->lock[0].l = 0;//(ver[0]<<8)+me;
+    tx->lock[1].l = 0;//(ver[1]<<8)+me; //unlock
+    tx->lock[0].v = tmlock[0].v;
+    tx->lock[1].v = tmlock[1].v;
+    shmem_getmem(account, account, 2*sizeof(long), tmlock[0].pe);
+    siglongjmp(tx->env, 0);
+  } 
+}
+
+static int transfer(long* src, long* dst, long amount) {
+  long tm;
+  stm_start(&g_tx);
+  sigsetjmp(g_tx.env, 0);
+  tm = stm_load(&g_tx, src);
+  tm -= amount;
+  stm_store(&g_tx, src, tm);
+  tm = stm_load(&g_tx, dst);
+  tm -= amount;
+  stm_store(&g_tx, dst, tm);
+  stm_commit(&g_tx);
+  return 0;
 }
 
 int
