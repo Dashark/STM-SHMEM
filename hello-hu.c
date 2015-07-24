@@ -173,7 +173,7 @@ static int transfer(long* src, long* dst, long amount) {
   tm -= amount;
   stm_store(&g_tx, src, tm);
   tm = stm_load(&g_tx, dst);
-  tm -= amount;
+  tm += amount;
   stm_store(&g_tx, dst, tm);
   stm_commit(&g_tx);
   return 0;
@@ -199,13 +199,15 @@ main (int argc, char **argv)
 
   shmem_init ();
 
+  stm_init(&g_tx);
   me = shmem_my_pe ();
   npes = shmem_n_pes ();
   lock[0].pe = me; lock[1].pe = me;
 
   gettimeofday(&start, NULL);
   while(1) {
-    //for debuging
+    transfer(&account[0], &account[1], 1);
+    /*/for debuging
     if(aborts[0] > 100000 || aborts[1]>100000) {
       //lock[0].l = lock[1].l = 0;
       break;
@@ -286,7 +288,7 @@ main (int argc, char **argv)
     lock[1].v += 1;
     lock[0].l = 0;
     lock[1].l = 0;
-    commits += 1;
+    commits += 1;*/
 
     gettimeofday(&end, NULL);
     dur = (end.tv_sec * 1000 + end.tv_usec / 1000) - (start.tv_sec * 1000 + start.tv_usec / 1000);
