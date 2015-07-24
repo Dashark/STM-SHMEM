@@ -66,7 +66,7 @@ typedef struct stm_tx {
   sigjmp_buf env;
   int me, npes;  //for SHMEM
   vlock_t lock[2];  //read set or write set
-
+  long tmp_account[2];
   //for debug
   int commits;
   int aborts[4];
@@ -78,10 +78,15 @@ void stm_init(stm_tx_t* tx) {
 }
 void stm_start(stm_tx_t* tx) {
 }
+//find the lock corresponding to addr.
 long stm_load(stm_tx_t* tx, long* addr) {
-  return 0;
+  return *addr;
 }
+//write the val into temp variable.
 void stm_store(stm_tx_t* tx, long* addr, long val) {
+  int i = 0;
+  i = (int)(addr-account);
+  tx->tmp_account[i] = val;
 }
 
 int check_lock(vlock_t* lock, int size) {
@@ -121,7 +126,7 @@ int check_lv_all(vlock_t* target, vlock_t* source, int nsize, int PEsize) {
 
 void stm_commit(stm_tx_t* tx) {
   int tmp;
-  tmp =check_lv_all(tmlock, tx->lock, 2, tx->npes);
+  tmp =check_lv_all(tmlock, lock, 2, tx->npes);
   if(tmp == 1) {
     tx->aborts[0] += 1;
     siglongjmp(tx->env, 0);  //what's the second param?
@@ -129,30 +134,35 @@ void stm_commit(stm_tx_t* tx) {
   else if(tmp == 2) {
     tx->aborts[1] += 1;
     //synchronization
-    tx->lock[0].v = tmlock[0].v;
-    tx->lock[1].v = tmlock[1].v;
+    lock[0].v = tmlock[0].v;
+    lock[1].v = tmlock[1].v;
     shmem_getmem(account, account, 2*sizeof(long), tmlock[0].pe);
     siglongjmp(tx->env, 0);
   }
-  tx->lock[0].l = 1;//MASK_LOCK;
-  tx->lock[1].l = 1;//MASK_LOCK;
+  lock[0].l = 1;//MASK_LOCK;
+  lock[1].l = 1;//MASK_LOCK;
   __sync_synchronize();
-  tmp = check_lv_all(tmlock, tx->lock, 2, tx->npes);
+  tmp = check_lv_all(tmlock, lock, 2, tx->npes);
   if(tmp == 1) {
     tx->aborts[2] += 1;
-    tx->lock[0].l = 0;
-    tx->lock[1].l = 0;
+    lock[0].l = 0;
+    lock[1].l = 0;
     siglongjmp(tx->env, 0);
   }
   else if(tmp == 2) {
     tx->aborts[3] += 1;
-    tx->lock[0].l = 0;//(ver[0]<<8)+me;
-    tx->lock[1].l = 0;//(ver[1]<<8)+me; //unlock
-    tx->lock[0].v = tmlock[0].v;
-    tx->lock[1].v = tmlock[1].v;
+    lock[0].l = 0;//(ver[0]<<8)+me;
+    lock[1].l = 0;//(ver[1]<<8)+me; //unlock
+    lock[0].v = tmlock[0].v;
+    lock[1].v = tmlock[1].v;
     shmem_getmem(account, account, 2*sizeof(long), tmlock[0].pe);
     siglongjmp(tx->env, 0);
   } 
+  account[0] = tx->tmp_account[0];
+  account[1] = tx->tmp_account[1];
+  lock[0].v += 1; lock[1].v += 1;
+  lock[0].l = lock[1].l = 0;
+  tx->commits += 1;
 }
 
 static int transfer(long* src, long* dst, long amount) {
