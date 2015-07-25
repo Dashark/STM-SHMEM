@@ -207,88 +207,6 @@ main (int argc, char **argv)
   gettimeofday(&start, NULL);
   while(1) {
     transfer(&account[0], &account[1], 1);
-    /*/for debuging
-    if(aborts[0] > 100000 || aborts[1]>100000) {
-      //lock[0].l = lock[1].l = 0;
-      break;
-    }
-    //stm_begin();
-    //stm_read();
-    tm1 = account[0];
-    tm2 = account[1];
-    //stm_write();
-    //    if(flag == 0) {
-      tm1 = tm1 - 1;
-      tm2 = tm2 + 1;
-      //    }
-      //    else {
-      //      tm1 = tm1 + 1;
-      //      tm2 = tm2 - 1;
-      //    }
-    //commit
-    //ver[0] = lock[0]>>8; ver[1] = lock[1]>>8; //keep the version
-    if((ver[0]+1)>=(1<<24))
-      overflow[0] = 1;
-    if((ver[1]+1)>=(1<<24))
-      overflow[1] = 1;
-    // is the newest version?
-    //if(check_lv()) {
-    if(tm3=check_lv_all(tmlock, lock, 2, npes)){
-      flag = flag == 0?1:0;  //change transferbound
-      if(tm3==1) {
-        aborts[0] += 1;
-	continue;
-      }
-      if(tm3==2) aborts[1] += 1;
-      //synchronization
-      //sync_lv();
-      lock[0].v = tmlock[0].v;
-      lock[1].v = tmlock[1].v;
-      shmem_getmem(account, account, 2*sizeof(long), tmlock[0].pe);
-      continue;
-    }
-    //locking
-    lock[0].l = 1;//MASK_LOCK;
-    lock[1].l = 1;//MASK_LOCK;
-    __sync_synchronize();
-    // is the newest version? because no atomic
-    //    shmem_max_to_all_nobarrier(tmlock, lock, 2, 0, 0, npes, pWrk, pSync);
-    //    if(tmlock[0].pe != lock[0].pe || tmlock[1].pe != lock[1].pe) {
-    if(tm3=check_lv_all(tmlock, lock, 2, npes)) {
-      flag = flag == 0?1:0;
-      if(tm3==1) {aborts[2] += 1; lock[0].l=lock[1].l = 0; continue;}
-      if(tm3==2) aborts[3] += 1;
-      lock[0].l = 0;//(ver[0]<<8)+me;
-      lock[1].l = 0;//(ver[1]<<8)+me; //unlock
-      lock[0].v = tmlock[0].v;
-      lock[1].v = tmlock[1].v;
-      shmem_getmem(account, account, 2*sizeof(long), tmlock[0].pe);
-      continue;
-    } 
-    account[0] = tm1;
-    account[1] = tm2;
-    ver[0] += 1; ver[1] += 1;
-    //version overflow
-    if(overflow[0]) {
-      ver[0] = 1;
-      //shmem_broadcast
-      for(i = 0; i < npes; ++i) {
-	if(i != me)
-          shmem_long_p(&lock[0], -1, i);
-      }
-    }
-    if(overflow[1]) {
-      ver[1] = 1;
-      for(i = 0; i < npes; ++i) {
-	if(i != me)
-	  shmem_long_p(&lock[1], -1, i);
-      }
-    }
-    lock[0].v += 1;//(ver[0]<<8)+me; lock[1] = (ver[1]<<8)+me; //unlock and update version.
-    lock[1].v += 1;
-    lock[0].l = 0;
-    lock[1].l = 0;
-    commits += 1;*/
 
     gettimeofday(&end, NULL);
     dur = (end.tv_sec * 1000 + end.tv_usec / 1000) - (start.tv_sec * 1000 + start.tv_usec / 1000);
@@ -299,7 +217,7 @@ main (int argc, char **argv)
   printf("%s the %d of %d\n", u.nodename, me, npes);
   if((account[0]+account[1])==0) {
     printf ("verification passed! %d, %d\n", account[0], account[1]);
-    printf("dur: %d, commits: %d, aborts: %d, %d, %d, %d\n",dur, commits, aborts[0], aborts[1], aborts[2], aborts[3]);
+    printf("dur: %d, commits: %d, aborts: %d, %d, %d, %d\n",dur, g_tx.commits, g_tx.aborts[0], g_tx.aborts[1], g_tx.aborts[2], g_tx.aborts[3]);
     printf("ver1: %d,%d,%d ver2: %x \n", lock[0].v,lock[0].l,lock[0].pe, lock[0]);
   }
   else
