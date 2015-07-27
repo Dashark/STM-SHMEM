@@ -56,17 +56,27 @@ typedef struct {
 long pSync[_SHMEM_REDUCE_SYNC_SIZE];
 long pWrk[_SHMEM_REDUCE_SYNC_SIZE];
 
-vlock_t lock[2]={0};
+vlock_t lock[1024]={0};
 vlock_t tmlock[2]={0};
-long account[2]={0};
+long account[1024]={0};
 long shared = 0;
 long tm1, tm2, tm3;
 //these codes are modified from tinySTM
+typedef struct w_entry {
+  long* addr;
+  long value;
+  vlock_t* lock;
+} w_entry_t;
+typedef struct w_set {
+  w_entry_t entries[1024];
+  unsigned long nb; //number of entries
+} w_set_t;
 typedef struct stm_tx {
   sigjmp_buf env;
   int me, npes;  //for SHMEM
   vlock_t lock[2];  //read set or write set
   long tmp_account[2];
+  w_set_t w_set;
   //for debug
   int commits;
   int aborts[4];
@@ -77,6 +87,7 @@ void stm_init(stm_tx_t* tx) {
   tx->npes = shmem_n_pes();
 }
 void stm_start(stm_tx_t* tx) {
+  tx->w_set.nb = 0;
 }
 //find the lock corresponding to addr.
 long stm_load(stm_tx_t* tx, long* addr) {
@@ -87,6 +98,15 @@ void stm_store(stm_tx_t* tx, long* addr, long val) {
   int i = 0;
   i = (int)(addr-account);
   tx->tmp_account[i] = val;
+  for(i = 0; i < tx->w_set.nb; i+=1)
+    if(addr == tx->w_set.entries[i].addr) {
+      tx->w_set.entries[i].value = val;
+      return;
+    }
+
+  tx->w_set.entries[tx->w_set.nb].addr = addr;
+  tx->w_set.entries[tx->w_set.nb].lock = &lock[addr-account];
+  tx->w_set.entries[tx->w_set.nb].value = val;
 }
 
 int check_lock(vlock_t* lock, int size) {
@@ -192,6 +212,14 @@ main (int argc, char **argv)
   struct timeval start, end;
   int dur;
 
+  int src, dst;
+  int rand_max, rand_min, rsd[3];
+  unsigned short seed[3];
+  rand_max = 1024; rand_min = 0;
+  rsd[0] = rand(); rsd[1] = rand(); rsd[2] = rand();
+  seed[0] = (unsigned short)rand_r(&rsd[0]);
+  seed[1] = (unsigned short)rand_r(&rsd[1]);
+  seed[2] = (unsigned short)rand_r(&rsd[2]);
   for (i = 0; i < _SHMEM_REDUCE_SYNC_SIZE; i += 1) {
       pSync[i] = _SHMEM_SYNC_VALUE;
   }
@@ -206,7 +234,9 @@ main (int argc, char **argv)
 
   gettimeofday(&start, NULL);
   while(1) {
-    transfer(&account[0], &account[1], 1);
+    src = (int)(erand48(seed) * rand_max) + rand_min;
+    dst = (int)(erand48(seed) * rand_max) + rand_min;
+    transfer(&account[src], &account[dst], 1);
 
     gettimeofday(&end, NULL);
     dur = (end.tv_sec * 1000 + end.tv_usec / 1000) - (start.tv_sec * 1000 + start.tv_usec / 1000);
