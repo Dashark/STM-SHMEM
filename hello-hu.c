@@ -95,8 +95,8 @@ long stm_load(stm_tx_t* tx, long* addr) {
 }
 //write the val into temp variable.
 void stm_store(stm_tx_t* tx, long* addr, long val) {
-  int i = 0;
-  i = (int)(addr-account);
+  int i = 0, idx;
+  idx = (int)(addr-account)/sizeof(long);
   tx->tmp_account[i] = val;
   for(i = 0; i < tx->w_set.nb; i+=1)
     if(addr == tx->w_set.entries[i].addr) {
@@ -107,6 +107,7 @@ void stm_store(stm_tx_t* tx, long* addr, long val) {
   tx->w_set.entries[tx->w_set.nb].addr = addr;
   tx->w_set.entries[tx->w_set.nb].lock = &lock[addr-account];
   tx->w_set.entries[tx->w_set.nb].value = val;
+  tx->w_set.nb += 1;
 }
 
 int check_lock(vlock_t* lock, int size) {
@@ -144,6 +145,27 @@ int check_lv_all(vlock_t* target, vlock_t* source, int nsize, int PEsize) {
   return ret;
 }
 
+int check_all(stm_tx_t* tx) {
+  int pe, ret = 0, i;
+  vlock_t* pWrk;
+  pWrk = (vlock_t*)malloc(tx->w_set.nb * sizeof(vlock_t));
+  for(pe=0; pe<tx->npes; ++pe) 
+    if(pe != tx->me) 
+      for(i=0; i<tx->w_set.nb; i+=1) {
+        shmem_getmem(&pWrk[i], tx->w_set.entries[i].lock, sizeof(vlock_t), pe);
+	if(pWrk[i].l == 1) {
+	  ret = 1;
+	  break;    // could be continue?
+	}
+	else if(pWrk[i].v > tx->w_set.entries[i].lock->v) {
+	  tx->w_set.entries[i].lock->v = pWrk[i].v;  //may not be maximum
+	  shmem_getmem(tx->w_set.entries[i].addr, tx->w_set.entries[i].addr, sizeof(long), pWrk[i].pe);
+	  ret = 2;
+	}
+      }
+  free(pWrk);
+  return ret;
+}
 void stm_commit(stm_tx_t* tx) {
   int tmp;
   tmp =check_lv_all(tmlock, lock, 2, tx->npes);
@@ -184,7 +206,46 @@ void stm_commit(stm_tx_t* tx) {
   lock[0].l = lock[1].l = 0;
   tx->commits += 1;
 }
-
+void lock_all(stm_tx_t* tx, int flag) {
+  int i = 0;
+  for(i = 0; i < tx->w_set.nb; i+= 1)
+    tx->w_set.entries[i].lock->l = flag==0?0:1;
+}
+void stm_commit1(stm_tx_t* tx) {
+  int ret = 0, i;
+  ret = check_all(tx);
+  if(ret == 1) {
+    tx->aborts[0] += 1;
+    tx->w_set.nb = 0;
+    siglongjmp(tx->env, 0);
+  }
+  else if(ret == 2) {
+    tx->aborts[1] += 1;
+    tx->w_set.nb = 0;
+    siglongjmp(tx->env, 0);
+  }
+  lock_all(tx, 1);
+  __sync_synchronize();
+  ret = check_all(tx);
+  if(ret == 1) {
+    tx->aborts[2] += 1;
+    tx->w_set.nb = 0;
+    lock_all(tx, 0);
+    siglongjmp(tx->env, 0);
+  }
+  else if(ret == 2) {
+    tx->aborts[3] += 1;
+    tx->w_set.nb = 0;
+    lock_all(tx, 0);
+    siglongjmp(tx->env, 0);
+  }
+  for(i = 0; i < tx->w_set.nb; i += 1) {
+    *(tx->w_set.entries[i].addr) = tx->w_set.entries[i].value;
+    tx->w_set.entries[i].lock->v += 1;
+  }
+  lock_all(tx, 0);
+  tx->commits += 1;
+}
 static int transfer(long* src, long* dst, long amount) {
   long tm;
   stm_start(&g_tx);
@@ -195,8 +256,18 @@ static int transfer(long* src, long* dst, long amount) {
   tm = stm_load(&g_tx, dst);
   tm += amount;
   stm_store(&g_tx, dst, tm);
-  stm_commit(&g_tx);
+  stm_commit1(&g_tx);
+  //check_all(&g_tx);
+  //lock_all(&g_tx, 1);
+  //g_tx.w_set.nb = 0;
   return 0;
+}
+
+int verify(long* acc, int size) {
+  int i, ret = 0;
+  for(i = 0; i < size; i += 1)
+    ret += acc[i];
+  return ret;
 }
 
 int
@@ -215,7 +286,7 @@ main (int argc, char **argv)
   int src, dst;
   int rand_max, rand_min, rsd[3];
   unsigned short seed[3];
-  rand_max = 1024; rand_min = 0;
+  rand_max = 1023; rand_min = 0;
   rsd[0] = rand(); rsd[1] = rand(); rsd[2] = rand();
   seed[0] = (unsigned short)rand_r(&rsd[0]);
   seed[1] = (unsigned short)rand_r(&rsd[1]);
@@ -236,6 +307,8 @@ main (int argc, char **argv)
   while(1) {
     src = (int)(erand48(seed) * rand_max) + rand_min;
     dst = (int)(erand48(seed) * rand_max) + rand_min;
+    if(dst == src)
+      dst = (src+1)%rand_max + rand_min;
     transfer(&account[src], &account[dst], 1);
 
     gettimeofday(&end, NULL);
@@ -245,13 +318,13 @@ main (int argc, char **argv)
   }
   //  shmem_barrier_all();
   printf("%s the %d of %d\n", u.nodename, me, npes);
-  if((account[0]+account[1])==0) {
-    printf ("verification passed! %d, %d\n", account[0], account[1]);
+  if((tm3 = verify(account, 1024))==0) {
+      //printf ("verification passed! %d, %d\n", account[0], account[1]);
     printf("dur: %d, commits: %d, aborts: %d, %d, %d, %d\n",dur, g_tx.commits, g_tx.aborts[0], g_tx.aborts[1], g_tx.aborts[2], g_tx.aborts[3]);
-    printf("ver1: %d,%d,%d ver2: %x \n", lock[0].v,lock[0].l,lock[0].pe, lock[0]);
+    //    printf("ver1: %d,%d,%d ver2: %x \n", lock[0].v,lock[0].l,lock[0].pe, lock[0]);
   }
   else
-    printf("verification failed, %d, %d\n", account[0], account[1]);
+    printf("verification failed, %d, %d, %d\n", tm3, account[0], account[1]);
 
   return 0;
 }
