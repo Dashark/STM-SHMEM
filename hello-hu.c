@@ -159,7 +159,7 @@ int check_all(stm_tx_t* tx) {
 	}
 	else if(pWrk[i].v > tx->w_set.entries[i].lock->v) {
 	  tx->w_set.entries[i].lock->v = pWrk[i].v;  //may not be maximum
-	  shmem_getmem(tx->w_set.entries[i].addr, tx->w_set.entries[i].addr, sizeof(long), pWrk[i].pe);
+	  //shmem_getmem(tx->w_set.entries[i].addr, tx->w_set.entries[i].addr, sizeof(long), pWrk[i].pe);
 	  ret = 2;
 	}
       }
@@ -229,14 +229,14 @@ void stm_commit1(stm_tx_t* tx) {
   ret = check_all(tx);
   if(ret == 1) {
     tx->aborts[2] += 1;
-    tx->w_set.nb = 0;
     lock_all(tx, 0);
+    tx->w_set.nb = 0;
     siglongjmp(tx->env, 0);
   }
   else if(ret == 2) {
     tx->aborts[3] += 1;
-    tx->w_set.nb = 0;
     lock_all(tx, 0);
+    tx->w_set.nb = 0;
     siglongjmp(tx->env, 0);
   }
   for(i = 0; i < tx->w_set.nb; i += 1) {
@@ -248,8 +248,13 @@ void stm_commit1(stm_tx_t* tx) {
 }
 static int transfer(long* src, long* dst, long amount) {
   long tm;
+
   stm_start(&g_tx);
   sigsetjmp(g_tx.env, 0);
+  //  if(g_tx.aborts[0]>1000||g_tx.aborts[1]>1000||g_tx.aborts[2]>1000||g_tx.aborts[3]>1000) {
+    //printf("infinite aborts\n");
+    //return 0;
+  //}
   tm = stm_load(&g_tx, src);
   tm -= amount;
   stm_store(&g_tx, src, tm);
@@ -263,10 +268,25 @@ static int transfer(long* src, long* dst, long amount) {
   return 0;
 }
 
-int verify(long* acc, int size) {
+int verify1(long* acc, int size) {
   int i, ret = 0;
-  for(i = 0; i < size; i += 1)
+  for(i=0;i<size;i+=1)
     ret += acc[i];
+  return ret;
+}
+int verify(long* acc, int size) {
+  int i,j,k, ret = 0;
+  for(j = 0; j < g_tx.npes; j += 1) {
+    if(j != g_tx.me) {
+      shmem_getmem(tmlock, lock, 1024, j);
+      for(k = 0; k < 1024; k += 1)
+	if(tmlock[k].v > lock[k].v)
+	  lock[k] = tmlock[k];
+    }
+  }
+  for(i=0; i<1024; i+=1)
+    if(lock[i].pe == g_tx.me)
+      ret += acc[i];
   return ret;
 }
 
@@ -289,8 +309,8 @@ main (int argc, char **argv)
   rand_max = 1023; rand_min = 0;
   rsd[0] = rand(); rsd[1] = rand(); rsd[2] = rand();
   seed[0] = (unsigned short)rand_r(&rsd[0]);
-  seed[1] = (unsigned short)rand_r(&rsd[1]);
-  seed[2] = (unsigned short)rand_r(&rsd[2]);
+  seed[1] = (unsigned short)rand_r(&rsd[0]);
+  seed[2] = (unsigned short)rand_r(&rsd[0]);
   for (i = 0; i < _SHMEM_REDUCE_SYNC_SIZE; i += 1) {
       pSync[i] = _SHMEM_SYNC_VALUE;
   }
@@ -301,8 +321,9 @@ main (int argc, char **argv)
   stm_init(&g_tx);
   me = shmem_my_pe ();
   npes = shmem_n_pes ();
-  lock[0].pe = me; lock[1].pe = me;
-
+  for(i=0;i<1024;i+=1)
+    lock[i].pe = me;
+  tm2 = verify1(account, 1024);
   gettimeofday(&start, NULL);
   while(1) {
     src = (int)(erand48(seed) * rand_max) + rand_min;
@@ -313,18 +334,21 @@ main (int argc, char **argv)
 
     gettimeofday(&end, NULL);
     dur = (end.tv_sec * 1000 + end.tv_usec / 1000) - (start.tv_sec * 1000 + start.tv_usec / 1000);
-    if(dur > 1000)
+    if(dur > 10000)
       break;
   }
-  //  shmem_barrier_all();
+  shmem_barrier_all();
   printf("%s the %d of %d\n", u.nodename, me, npes);
-  if((tm3 = verify(account, 1024))==0) {
-      //printf ("verification passed! %d, %d\n", account[0], account[1]);
+  tm1 = verify1(account, 1024);
+  tm3 = verify(account, 1024);
+  printf ("verification passed? %d, %d, %d\n", tm1, tm2, tm3);
     printf("dur: %d, commits: %d, aborts: %d, %d, %d, %d\n",dur, g_tx.commits, g_tx.aborts[0], g_tx.aborts[1], g_tx.aborts[2], g_tx.aborts[3]);
     //    printf("ver1: %d,%d,%d ver2: %x \n", lock[0].v,lock[0].l,lock[0].pe, lock[0]);
-  }
-  else
-    printf("verification failed, %d, %d, %d\n", tm3, account[0], account[1]);
+  
 
+//    printf("verification failed, %d, %d, %d\n", tm3, tm2, account[1]);
+//    if(me==0)
+    //    for(i=0;i<1024;i+=1)
+    //	printf("%d,", account[i]);
   return 0;
 }
