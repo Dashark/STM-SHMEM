@@ -147,23 +147,33 @@ int check_lv_all(vlock_t* target, vlock_t* source, int nsize, int PEsize) {
 
 int check_all(stm_tx_t* tx) {
   int pe, ret = 0, i;
-  vlock_t* pWrk;
-  pWrk = (vlock_t*)malloc(tx->w_set.nb * sizeof(vlock_t));
-  for(pe=0; pe<tx->npes; ++pe) 
-    if(pe != tx->me) 
+  vlock_t pWrk[1024], max_lv[1024]={0};
+  for(i=0;i<1024;i+=1)
+    max_lv[i] = lock[i];
+
+  for(pe=0; pe<tx->npes; ++pe) {
+    if(pe != tx->me) {
+      shmem_getmem(pWrk, lock, 1024*sizeof(vlock_t), pe);
       for(i=0; i<tx->w_set.nb; i+=1) {
-        shmem_getmem(&pWrk[i], tx->w_set.entries[i].lock, sizeof(vlock_t), pe);
-	if(pWrk[i].l == 1) {
+        int idx = (int)(tx->w_set.entries[i].addr - account);
+	if(pWrk[idx].l == 1) {
 	  ret = 1;
-	  break;    // could be continue?
+	  return ret;    // could be continue?
 	}
-	else if(pWrk[i].v > tx->w_set.entries[i].lock->v) {
-	  tx->w_set.entries[i].lock->v = pWrk[i].v;  //may not be maximum
-	  //shmem_getmem(tx->w_set.entries[i].addr, tx->w_set.entries[i].addr, sizeof(long), pWrk[i].pe);
+	else if(pWrk[idx].v > max_lv[idx].v) {
+	  max_lv[idx] = pWrk[idx];  //may not be maximum
 	  ret = 2;
 	}
       }
-  free(pWrk);
+    }
+  }
+  if(ret == 2) {
+    for(i=0;i<tx->w_set.nb; i+=1) {
+      int idx = (int)(tx->w_set.entries[i].addr - account);
+      shmem_getmem(tx->w_set.entries[i].addr, tx->w_set.entries[i].addr, sizeof(long), max_lv[idx].pe);
+      lock[idx].v = max_lv[idx].v;
+    }
+  }
   return ret;
 }
 void stm_commit(stm_tx_t* tx) {
@@ -251,10 +261,10 @@ static int transfer(long* src, long* dst, long amount) {
 
   stm_start(&g_tx);
   sigsetjmp(g_tx.env, 0);
-  //  if(g_tx.aborts[0]>1000||g_tx.aborts[1]>1000||g_tx.aborts[2]>1000||g_tx.aborts[3]>1000) {
-    //printf("infinite aborts\n");
-    //return 0;
-  //}
+  //    if(g_tx.aborts[0]>1000||g_tx.aborts[1]>1000||g_tx.aborts[2]>1000||g_tx.aborts[3]>1000) {
+      //printf("infinite aborts\n");
+  //    return 0;
+  //  }
   tm = stm_load(&g_tx, src);
   tm -= amount;
   stm_store(&g_tx, src, tm);
