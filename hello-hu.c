@@ -57,7 +57,7 @@ long pSync[_SHMEM_REDUCE_SYNC_SIZE];
 long pWrk[_SHMEM_REDUCE_SYNC_SIZE];
 
 vlock_t lock[1024]={0};
-vlock_t tmlock[2]={0};
+vlock_t tmlock[1024]={0};
 long account[1024]={0};
 long shared = 0;
 long tm1, tm2, tm3;
@@ -288,7 +288,7 @@ int verify(long* acc, int size) {
   int i,j,k, ret = 0;
   for(j = 0; j < g_tx.npes; j += 1) {
     if(j != g_tx.me) {
-      shmem_getmem(tmlock, lock, 1024, j);
+      shmem_getmem(tmlock, lock, 1024*sizeof(vlock_t), j);
       for(k = 0; k < 1024; k += 1)
 	if(tmlock[k].v > lock[k].v)
 	  lock[k] = tmlock[k];
