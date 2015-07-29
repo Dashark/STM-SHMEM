@@ -45,9 +45,7 @@
 #include <setjmp.h>
 
 #include <shmem.h>
-#define MASK_LOCK  0x00000080
-#define MASK_PE  0x0000007F
-#define MASK_VER 0xFFFFFF00
+
 typedef struct {
   unsigned long pe:7;
   unsigned long l:1;
@@ -59,29 +57,31 @@ long pWrk[_SHMEM_REDUCE_SYNC_SIZE];
 vlock_t lock[1024]={0};
 vlock_t tmlock[1024]={0};
 long account[1024]={0};
-long shared = 0;
-long tm1, tm2, tm3;
+
+
 //these codes are modified from tinySTM
 typedef struct w_entry {
   long* addr;
   long value;
   vlock_t* lock;
 } w_entry_t;
+
 typedef struct w_set {
   w_entry_t entries[1024];
   unsigned long nb; //number of entries
 } w_set_t;
+
 typedef struct stm_tx {
   sigjmp_buf env;
   int me, npes;  //for SHMEM
-  vlock_t lock[2];  //read set or write set
-  long tmp_account[2];
+
   w_set_t w_set;
   //for debug
   int commits;
   int aborts[4];
 } stm_tx_t;
 static stm_tx_t g_tx;  //global transactional descriptor
+
 void stm_init(stm_tx_t* tx) {
   tx->me = shmem_my_pe ();
   tx->npes = shmem_n_pes();
@@ -95,9 +95,7 @@ long stm_load(stm_tx_t* tx, long* addr) {
 }
 //write the val into temp variable.
 void stm_store(stm_tx_t* tx, long* addr, long val) {
-  int i = 0, idx;
-  idx = (int)(addr-account)/sizeof(long);
-  tx->tmp_account[i] = val;
+  int i = 0;
   for(i = 0; i < tx->w_set.nb; i+=1)
     if(addr == tx->w_set.entries[i].addr) {
       tx->w_set.entries[i].value = val;
@@ -108,41 +106,6 @@ void stm_store(stm_tx_t* tx, long* addr, long val) {
   tx->w_set.entries[tx->w_set.nb].lock = &lock[addr-account];
   tx->w_set.entries[tx->w_set.nb].value = val;
   tx->w_set.nb += 1;
-}
-
-int check_lock(vlock_t* lock, int size) {
-  int i;
-  for(i=0; i<size; ++i) {
-    if(lock[i].l)
-      return 1;   // at least one locked in group
-  }
-  return 0;
-}
-
-int check_lv_all(vlock_t* target, vlock_t* source, int nsize, int PEsize) {
-  int pe, ret = 0, i;
-  vlock_t* pWrk;
-  for(i=0; i<nsize; ++i)
-    target[i] = source[i];
-  pWrk = (vlock_t*)malloc(nsize * sizeof(vlock_t));
-  for(pe=0; pe<PEsize; ++pe) {
-    if(pe != shmem_my_pe()) {
-      shmem_getmem(pWrk, source, nsize*sizeof(vlock_t), pe);
-      if(check_lock(pWrk, nsize)){
-	ret = 1;
-	break;
-      }
-      if(pWrk[0].v > target[0].v || pWrk[1].v > target[1].v) {
-        ret = 2; //old version
-	for(i=0;i<nsize;++i)
-	  target[i] = pWrk[i];
-	//break;
-      }
-    }
-  }
-
-  free(pWrk);
-  return ret;
 }
 
 int check_all(stm_tx_t* tx) {
@@ -176,52 +139,13 @@ int check_all(stm_tx_t* tx) {
   }
   return ret;
 }
-void stm_commit(stm_tx_t* tx) {
-  int tmp;
-  tmp =check_lv_all(tmlock, lock, 2, tx->npes);
-  if(tmp == 1) {
-    tx->aborts[0] += 1;
-    siglongjmp(tx->env, 0);  //what's the second param?
-  }
-  else if(tmp == 2) {
-    tx->aborts[1] += 1;
-    //synchronization
-    lock[0].v = tmlock[0].v;
-    lock[1].v = tmlock[1].v;
-    shmem_getmem(account, account, 2*sizeof(long), tmlock[0].pe);
-    siglongjmp(tx->env, 0);
-  }
-  lock[0].l = 1;//MASK_LOCK;
-  lock[1].l = 1;//MASK_LOCK;
-  __sync_synchronize();
-  tmp = check_lv_all(tmlock, lock, 2, tx->npes);
-  if(tmp == 1) {
-    tx->aborts[2] += 1;
-    lock[0].l = 0;
-    lock[1].l = 0;
-    siglongjmp(tx->env, 0);
-  }
-  else if(tmp == 2) {
-    tx->aborts[3] += 1;
-    lock[0].l = 0;//(ver[0]<<8)+me;
-    lock[1].l = 0;//(ver[1]<<8)+me; //unlock
-    lock[0].v = tmlock[0].v;
-    lock[1].v = tmlock[1].v;
-    shmem_getmem(account, account, 2*sizeof(long), tmlock[0].pe);
-    siglongjmp(tx->env, 0);
-  } 
-  account[0] = tx->tmp_account[0];
-  account[1] = tx->tmp_account[1];
-  lock[0].v += 1; lock[1].v += 1;
-  lock[0].l = lock[1].l = 0;
-  tx->commits += 1;
-}
+
 void lock_all(stm_tx_t* tx, int flag) {
   int i = 0;
   for(i = 0; i < tx->w_set.nb; i+= 1)
     tx->w_set.entries[i].lock->l = flag==0?0:1;
 }
-void stm_commit1(stm_tx_t* tx) {
+void stm_commit(stm_tx_t* tx) {
   int ret = 0, i;
   ret = check_all(tx);
   if(ret == 1) {
@@ -271,10 +195,7 @@ static int transfer(long* src, long* dst, long amount) {
   tm = stm_load(&g_tx, dst);
   tm += amount;
   stm_store(&g_tx, dst, tm);
-  stm_commit1(&g_tx);
-  //check_all(&g_tx);
-  //lock_all(&g_tx, 1);
-  //g_tx.w_set.nb = 0;
+  stm_commit(&g_tx);
   return 0;
 }
 
@@ -353,12 +274,6 @@ main (int argc, char **argv)
   tm3 = verify(account, 1024);
   printf ("verification passed? %d, %d, %d\n", tm1, tm2, tm3);
     printf("dur: %d, commits: %d, aborts: %d, %d, %d, %d\n",dur, g_tx.commits, g_tx.aborts[0], g_tx.aborts[1], g_tx.aborts[2], g_tx.aborts[3]);
-    //    printf("ver1: %d,%d,%d ver2: %x \n", lock[0].v,lock[0].l,lock[0].pe, lock[0]);
-  
 
-//    printf("verification failed, %d, %d, %d\n", tm3, tm2, account[1]);
-//    if(me==0)
-    //    for(i=0;i<1024;i+=1)
-    //	printf("%d,", account[i]);
   return 0;
 }
