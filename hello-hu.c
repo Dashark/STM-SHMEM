@@ -209,7 +209,8 @@ main (int argc, char **argv)
   }
   uname (&u);
 
-  shmem_init ();
+  start_pes(0);
+  //shmem_init ();
 
   stm_init(&g_tx);
   me = shmem_my_pe ();
