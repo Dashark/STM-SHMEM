@@ -68,7 +68,7 @@ main ()
       printf ("pe %d was first\n", me);
       }*/
   gettimeofday(&end, NULL);
-  dur = (end.tv_sec * 1000 + end.tv_usec / 1000) - (start.tv_sec * 1000 + start.tv_usec / 1000);
+  dur = (end.tv_sec * 1000000 + end.tv_usec) - (start.tv_sec * 1000000 + start.tv_usec);
   printf("%s pe %d/%d spent %d ms \n", u.nodename, me, npes, dur);
   return 0;
 }
