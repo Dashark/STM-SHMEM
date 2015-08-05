@@ -19,7 +19,7 @@ long pWrk[_SHMEM_REDUCE_SYNC_SIZE];
 vlock_t lock[1024]={0};
 vlock_t tmlock[1024]={0};
 long account[1024]={0};
-
+long tmacc[1024]={0};
 
 //these codes are modified from tinySTM
 typedef struct w_entry {
@@ -93,8 +93,11 @@ int check_all(stm_tx_t* tx) {
     }
   }
   if(ret == 2) {
+    //    int idx = (int)(tx->w_set.entries[0].addr - account);
+    //shmem_getmem(tmacc, account, 1024*sizeof(long), max_lv[idx].pe); 
     for(i=0;i<tx->w_set.nb; i+=1) {
       int idx = (int)(tx->w_set.entries[i].addr - account);
+      //*(tx->w_set.entries[i].addr)=tmacc[idx];
       shmem_getmem(tx->w_set.entries[i].addr, tx->w_set.entries[i].addr, sizeof(long), max_lv[idx].pe);
       lock[idx].v = max_lv[idx].v;
     }
@@ -218,6 +221,8 @@ main (int argc, char **argv)
   for(i=0;i<1024;i+=1)
     lock[i].pe = me;
   tm2 = verify1(account, 1024);
+  rand_min=(rand_max/npes)*me;
+    rand_max = (rand_max/npes);
   shmem_barrier_all();
   gettimeofday(&start, NULL);
   while(1) {
