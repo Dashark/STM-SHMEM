@@ -114,7 +114,7 @@ static void make_swap_request(void* target, void* value, size_t nbytes, int pe, 
     p->completed_addr = &(p->completed);
     /* fire off request */
     gasnet_AMRequestMedium0 (pe, GASNET_HANDLER_SWAP_OUT, p, sizeof (*p));
-    //GASNET_BLOCKUNTIL(p->completed);
+    GASNET_BLOCKUNTIL(p->completed);
     free (p);
 }
 static gasnet_handlerentry_t handlers[] = {
@@ -142,8 +142,9 @@ main (int argc, char **argv)
   //npes = shmem_n_pes();
   //shmem_barrier_all();
   gettimeofday(&start, NULL);
-  if(rank == 0)
+  //  if(rank == 0)
     for(i=1;i<size;i+=1)
+      if(rank != i)
       make_swap_request (&race_winner, &tmp, sizeof(int), i, &oldval);
 
   /*if (oldval == -1)
