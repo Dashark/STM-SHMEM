@@ -44,9 +44,12 @@ CC = ~/SHMEM/bin/oshcc
 #
 # GASNet installation root, and setup
 #
-GASNET_ROOT      = /opt/berkeley/gasnet/openmpi/gnu/1.24.2/everything/
-GASNET_INCDIR    = /opt/berkeley/gasnet/openmpi/gnu/1.24.2/everything//include
-GASNET_BINDIR    = /opt/berkeley/gasnet/openmpi/gnu/1.24.2/everything//bin
+# GASNET_ROOT      = /opt/berkeley/gasnet/openmpi/gnu/1.24.2/everything/
+GASNET_ROOT      = /home/shark/GASNet/
+# GASNET_INCDIR    = /opt/berkeley/gasnet/openmpi/gnu/1.24.2/everything//include
+GASNET_INCDIR    = /home/shark/GASNet/include
+# GASNET_BINDIR    = /opt/berkeley/gasnet/openmpi/gnu/1.24.2/everything//bin
+GASNET_BINDIR    = /home/shark/GASNet/bin
 GASNET_CONDUIT   = ibv
 GASNET_THRENV    = par
 
@@ -83,8 +86,8 @@ all default:    $(EXES)
 
 %.x:    %.c
 
-	$(GASNET_CC) $(GASNET_CPPFLAGS) $(GASNET_CFLAGS) -c swap_hu.c
-	$(GASNET_LD) $(GASNET_LDFLAGS) -o swap_hu.x swap_hu.o $(GASNET_LIBS)
+	$(GASNET_CC) $(GASNET_CPPFLAGS) $(GASNET_CFLAGS) -fgnu-tm -c swap_hu.c
+	$(GASNET_LD) $(GASNET_LDFLAGS) -fgnu-tm -o swap_hu.x swap_hu.o $(GASNET_LIBS)
 #	        $(CC) $(SHMEM_CFLAGS) -o $@ $^
 
 
