@@ -70,15 +70,16 @@ static void handler_swap_bak(gasnet_token_t token, void* buf, size_t bufsiz) {
     atomic_payload_t *pp = (atomic_payload_t *) buf;
 
     gasnet_hsl_lock (&amo_swap_lock);
-
+    //__transaction_atomic {
     /* save returned value */
-    //(void) memmove (pp->local_store, &(pp->value), pp->nbytes);
+      //    (void) memmove (pp->local_store, &(pp->value), pp->nbytes);
+    (void) memmove (&race_winner, &(pp->value), pp->nbytes);
 
-    LOAD_STORE_FENCE ();
+    //    LOAD_STORE_FENCE ();
 
     /* done it */
     *(pp->completed_addr) = 1;
-
+    //}
     gasnet_hsl_unlock (&amo_swap_lock);
 }
 static void handler_swap_out(gasnet_token_t token, void* buf, size_t bufsiz) {
@@ -86,15 +87,17 @@ static void handler_swap_out(gasnet_token_t token, void* buf, size_t bufsiz) {
     atomic_payload_t *pp = (atomic_payload_t *) buf;
 
     gasnet_hsl_lock (&amo_swap_lock);
+    //__transaction_atomic {
 
     /* save and update */
-    //(void) memmove (&old, &race_winner, pp->nbytes);
-    //(void) memmove (&race_winner, &(pp->value), pp->nbytes);
+    (void) memmove (&old, &race_winner, pp->nbytes);
+    (void) memmove (&race_winner, &(pp->value), pp->nbytes);
     pp->value = old;
 
-    LOAD_STORE_FENCE ();
+    //LOAD_STORE_FENCE ();
 
     gasnet_hsl_unlock (&amo_swap_lock);
+    //}
 
     /* return updated payload */
     gasnet_AMReplyMedium0 (token, GASNET_HANDLER_SWAP_BAK, buf, bufsiz);
@@ -114,7 +117,7 @@ static void make_swap_request(void* target, void* value, size_t nbytes, int pe, 
     p->completed_addr = &(p->completed);
     /* fire off request */
     gasnet_AMRequestMedium0 (pe, GASNET_HANDLER_SWAP_OUT, p, sizeof (*p));
-    GASNET_BLOCKUNTIL(p->completed);
+    //GASNET_BLOCKUNTIL(p->completed);
     free (p);
 }
 static gasnet_handlerentry_t handlers[] = {
